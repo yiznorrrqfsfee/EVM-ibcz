@@ -1,0 +1,112 @@
+package ibc
+
+import (
+	"fmt"
+	"strings"
+
+	sdk "github.com/cosmos/cosmos-sdk/types"
+)
+
+// LockedAsset represents a locked asset on the Cosmos chain
+type LockedAsset struct {
+	Owner    sdk.AccAddress `json:"owner"`
+	Amount   sdk.Coin       `json:"amount"`
+	EvmChain string         `json:"evm_chain"`
+}
+
+// MsgLockAsset defines the LockAsset message
+type MsgLockAsset struct {
+	Sender sdk.AccAddress `json:"sender"`
+	Amount sdk.Coin       `json:"amount"`
+	EvmChain string      `json:"evm_chain"`
+}
+
+// MsgUnlockAsset defines the UnlockAsset message
+type MsgUnlockAsset struct {
+	Owner    sdk.AccAddress `json:"owner"`
+	Amount   sdk.Coin       `json:"amount"`
+	EvmChain string         `json:"evm_chain"`
+}
+
+// MsgQueryLockedAssets defines the QueryLockedAssets message
+type MsgQueryLockedAssets struct {
+	Owner sdk.AccAddress `json:"owner"`
+}
+
+// MsgQueryAssetsOnEVM defines the QueryAssetsOnEVM message
+type MsgQueryAssetsOnEVM struct {
+	EvmChain string `json:"evm_chain"`
+}
+
+// HandleMsgLockAsset handles the LockAsset message
+func HandleMsgLockAsset(ctx sdk.Context, k Keeper, msg MsgLockAsset) sdk.Result {
+	// Deduct the asset from the sender's account
+	err := k.bankKeeper.SendCoins(ctx, msg.Sender, sdk.AccAddress{}, sdk.Coins{msg.Amount})
+	if err != nil {
+		return err.Result()
+	}
+
+	// Store the locked asset information
+	lockedAsset := LockedAsset{
+		Owner:    msg.Sender,
+		Amount:   msg.Amount,
+		EvmChain: msg.EvmChain,
+	}
+	k.SetLockedAsset(ctx, lockedAsset)
+
+	return sdk.Result{Code: sdk.CodeOK}
+}
+
+// HandleMsgUnlockAsset handles the UnlockAsset message
+func HandleMsgUnlockAsset(ctx sdk.Context, k Keeper, msg MsgUnlockAsset) sdk.Result {
+	// Retrieve the locked asset information
+	lockedAsset, found := k.GetLockedAsset(ctx, msg.Owner, msg.EvmChain)
+	if !found {
+		return sdk.ErrUnknownRequest(fmt.Sprintf("locked asset not found for owner %s on EVM chain %s", msg.Owner, msg.EvmChain)).Result()
+	}
+
+	// Transfer the locked asset back to the owner
+	err := k.bankKeeper.SendCoins(ctx, sdk.AccAddress{}, msg.Owner, sdk.Coins{lockedAsset.Amount})
+	if err != nil {
+		return err.Result()
+	}
+
+	// Remove the locked asset record
+	k.DeleteLockedAsset(ctx, lockedAsset)
+
+	return sdk.Result{Code: sdk.CodeOK}
+}
+
+// HandleMsgQueryLockedAssets handles the QueryLockedAssets message
+func HandleMsgQueryLockedAssets(ctx sdk.Context, k Keeper, msg MsgQueryLockedAssets) sdk.Result {
+	// Query locked assets for a specific owner
+	lockedAssets := k.GetLockedAssetsByOwner(ctx, msg.Owner)
+
+	// Encode and return the result
+	bz, err := codec.MarshalJSONIndent(k.cdc, lockedAssets)
+	if err != nil {
+		return sdk.ErrInternal(fmt.Sprintf("failed to marshal result: %s", err)).Result()
+	}
+
+	return sdk.Result{
+		Code: sdk.CodeOK,
+		Data: bz,
+	}
+}
+
+// HandleMsgQueryAssetsOnEVM handles the QueryAssetsOnEVM message
+func HandleMsgQueryAssetsOnEVM(ctx sdk.Context, k Keeper, msg MsgQueryAssetsOnEVM) sdk.Result {
+	// Query locked assets on a specific EVM chain
+	lockedAssets := k.GetLockedAssetsOnEVM(ctx, msg.EvmChain)
+
+	// Encode and return the result
+	bz, err := codec.MarshalJSONIndent(k.cdc, lockedAssets)
+	if err != nil {
+		return sdk.ErrInternal(fmt.Sprintf("failed to marshal result: %s", err)).Result()
+	}
+
+	return sdk.Result{
+		Code: sdk.CodeOK,
+		Data: bz,
+	}
+}
